@@ -4,6 +4,7 @@ import os
 import shutil
 import setup
 import argparse
+import re
 
 
 SECONDS_IN_7_DAYS = 7 * 24 * 60 * 60
@@ -59,6 +60,36 @@ def collect_files(base_dir):
 
     return files
 
+
+def resolve_collision(target_path):
+    """
+    Handles collisions smartly:
+    - If file exists, increment the number in parentheses.
+    - If no number, start with (1).
+    - Never stack numbers.
+    """
+    if not os.path.exists(target_path):
+        return target_path
+
+    directory, filename = os.path.split(target_path)
+    name, ext = os.path.splitext(filename)
+
+    # Check for existing (number) at the end
+    match = re.search(r'\((\d+)\)$', name)
+    if match:
+        base_name = name[:match.start()].rstrip()  # remove the (n)
+        number = int(match.group(1)) + 1
+    else:
+        base_name = name
+        number = 1
+
+    while True:
+        new_name = f"{base_name} ({number}){ext}"
+        new_path = os.path.join(directory, new_name)
+        if not os.path.exists(new_path):
+            return new_path
+        number += 1
+
 def organize_files(sort_dir, dry_run=False):
     recent_dir = os.path.join(sort_dir, "recent")
     if not dry_run:
@@ -86,12 +117,26 @@ def organize_files(sort_dir, dry_run=False):
                     os.makedirs(target_dir, exist_ok=True)
                 target_path = os.path.join(target_dir, filename)
 
-            if os.path.abspath(file_path) != os.path.abspath(target_path):
+            # Determine final target only if a real collision exists
+            if os.path.exists(target_path) and os.path.abspath(file_path) != os.path.abspath(target_path):
+                final_target = resolve_collision(target_path)
+            else:
+                final_target = target_path
+
+
+            if os.path.abspath(file_path) != os.path.abspath(final_target):
                 if dry_run:
-                    print(f"[DRY-RUN] WOULD MOVE: {filename} → {os.path.relpath(target_path, sort_dir)}")
+                    print(
+                        f"[DRY-RUN] WOULD MOVE: {filename} → "
+                        f"{os.path.relpath(final_target, sort_dir)}"
+                    )
                 else:
-                    shutil.move(file_path, target_path)
-                    print(f"MOVED: {filename} → {os.path.relpath(target_path, sort_dir)}")
+                    shutil.move(file_path, final_target)
+                    print(
+                        f"MOVED: {filename} → "
+                        f"{os.path.relpath(final_target, sort_dir)}"
+                    )
+
 
         except Exception as e:
             print(f"ERROR: {filename} → {e}")
